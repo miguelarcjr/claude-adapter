@@ -6,7 +6,7 @@ The format follows **Keep a Changelog** and this project adheres to **Semantic V
 
 ---
 
-## [2.1.0] — 2025-01-19
+## [2.1.0] — 2026-01-19
 
 ### Added
 
