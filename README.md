@@ -22,8 +22,7 @@
 ---
 
 ## Overview
-
-**Claude Adapter** serves as a sophisticated middleware solution designed to bridge the interoperability gap between the Anthropic Messages API and the OpenAI Chat Completions ecosystem. By functioning as a transparent proxy, it enables **Claude Code**—Anthropic's command-line interface—to leverage the capabilities of any OpenAI-compatible large language model (LLM), regardless of the provider.
+Unlock the full potential of Claude Code using **Claude Adapter**S. It seamlessly connects Anthropic's powerful CLI to DeepSeek, GPT-Codex, Grok, and any OpenAI-compatible provider.
 
 This adapter effectively "tricks" Claude Code into communicating with models it was not natively designed to support, handling all necessary protocol translations, header modifications, and payload restructuring in real-time.
 
@@ -95,13 +94,13 @@ npm install -g claude-adapter
 
 The CLI accepts several flags to customize runtime behavior:
 
-| Option                  | Description                                   | Default |
-| ----------------------- | --------------------------------------------- | ------- |
-| `-p, --port <port>`     | Specifies the port for the local proxy server | `3080`  |
-| `-r, --reconfigure`     | Forces the specific reconfiguration workflow  | `false` |
-| `--no-claude-settings`  | Skip updating Claude Code settings files      | `false` |
-| `-V, --version`         | Output the current version information        | —       |
-| `-h, --help`            | Display available commands and options        | —       |
+| Option                 | Description                                   | Default |
+| ---------------------- | --------------------------------------------- | ------- |
+| `-p, --port <port>`    | Specifies the port for the local proxy server | `3080`  |
+| `-r, --reconfigure`    | Forces the specific reconfiguration workflow  | `false` |
+| `--no-claude-settings` | Skip updating Claude Code settings files      | `false` |
+| `-V, --version`        | Output the current version information        | —       |
+| `-h, --help`           | Display available commands and options        | —       |
 
 ### Model Mapping Configuration
 
@@ -109,9 +108,9 @@ The core of the adapter's flexibility lies in its ability to map Claude's expect
 
 | Claude Tier | Intended Use Case | Example Mapping Strategy       |
 | ----------- | ----------------- | ------------------------------ |
-| `opus`      | Complex reasoning | `gpt-4`, `grok-1`              |
-| `sonnet`    | Balanced tasks    | `gpt-4-turbo`, `deepseek-chat` |
-| `haiku`     | Low-latency ops   | `gpt-3.5-turbo`, `llama-3-70b` |
+| `opus`      | Complex reasoning | `gpt-5.2-codex`, `glm-4.7`     |
+| `sonnet`    | Balanced tasks    | `deepseek-3.2`, `minimax-m2.1` |
+| `haiku`     | Low-latency ops   | `gpt-5-mini`, `gpt-oss-120b`   |
 
 ---
 
@@ -128,9 +127,9 @@ const config: AdapterConfig = {
   baseUrl: 'https://api.openai.com/v1',
   apiKey: process.env.OPENAI_API_KEY!,
   models: {
-    opus: 'gpt-4',
-    sonnet: 'gpt-4-turbo',
-    haiku: 'gpt-3.5-turbo'
+    opus: 'gpt-5.2-codex-max',
+    sonnet: 'gpt-5.2-codex',
+    haiku: 'gpt-5-mini'
   }
 };
 
