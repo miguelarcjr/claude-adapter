@@ -6,6 +6,12 @@ export interface AdapterConfig {
     models: ModelConfig;
     toolFormat?: 'native' | 'xml';  // Default: 'native'
     port?: number;
+    stackspot?: {
+        clientId: string;
+        clientSecret: string;
+        realm: string;
+        agentId: string;
+    };
 }
 
 export interface ModelConfig {

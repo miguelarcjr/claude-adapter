@@ -1,6 +1,6 @@
 // Proxy server request handlers
 import { FastifyRequest, FastifyReply } from 'fastify';
-import OpenAI from 'openai';
+import { StackSpotClient } from '../stackspot/client';
 import { AnthropicMessageRequest } from '../types/anthropic';
 import { AdapterConfig } from '../types/config';
 import { convertRequestToOpenAI } from '../converters/request';
@@ -26,10 +26,14 @@ function generateRequestId(): string {
  * Handle POST /v1/messages requests
  */
 export function createMessagesHandler(config: AdapterConfig) {
-    const openai = new OpenAI({
-        baseURL: config.baseUrl,
-        apiKey: config.apiKey,
-    });
+    const stackspot = new StackSpotClient(
+        config.stackspot || { 
+            clientId: process.env.STACKSPOT_CLIENT_ID || '', 
+            clientSecret: process.env.STACKSPOT_CLIENT_SECRET || '',
+            realm: process.env.STACKSPOT_REALM || '',
+            agentId: process.env.STACKSPOT_AGENT_ID || ''
+        }
+    );
 
     return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
         const requestId = generateRequestId();
@@ -68,12 +72,12 @@ export function createMessagesHandler(config: AdapterConfig) {
 
             if (isStreaming) {
                 if (toolStyle === 'xml') {
-                    await handleXmlStreamingRequest(openai, openaiRequest, reply, anthropicRequest.model, config.baseUrl, log);
+                    await handleXmlStreamingRequest(stackspot, openaiRequest, reply, anthropicRequest.model, config.baseUrl, log);
                 } else {
-                    await handleStreamingRequest(openai, openaiRequest, reply, anthropicRequest.model, config.baseUrl, log);
+                    await handleStreamingRequest(stackspot, openaiRequest, reply, anthropicRequest.model, config.baseUrl, log);
                 }
             } else {
-                await handleNonStreamingRequest(openai, openaiRequest, reply, anthropicRequest.model, config.baseUrl, log);
+                await handleNonStreamingRequest(stackspot, openaiRequest, reply, anthropicRequest.model, config.baseUrl, log);
             }
 
             log.info(`← ${targetModel} [received]`);
@@ -93,7 +97,7 @@ export function createMessagesHandler(config: AdapterConfig) {
  * Handle non-streaming API request
  */
 async function handleNonStreamingRequest(
-    openai: OpenAI,
+    client: any,
     openaiRequest: any,
     reply: FastifyReply,
     originalModel: string,
@@ -102,7 +106,7 @@ async function handleNonStreamingRequest(
 ): Promise<void> {
     log.debug('Making non-streaming request');
 
-    const response = await openai.chat.completions.create({
+    const response = await client.chatCompletionsCreate({
         ...openaiRequest,
         stream: false,
     });
@@ -133,7 +137,7 @@ async function handleNonStreamingRequest(
  * Handle streaming API request
  */
 async function handleStreamingRequest(
-    openai: OpenAI,
+    client: any,
     openaiRequest: any,
     reply: FastifyReply,
     originalModel: string,
@@ -142,10 +146,10 @@ async function handleStreamingRequest(
 ): Promise<void> {
     log.debug('Making streaming request');
 
-    const stream = await openai.chat.completions.create({
+    const stream = await client.chatCompletionsCreate({
         ...openaiRequest,
         stream: true,
-    } as OpenAI.ChatCompletionCreateParamsStreaming);
+    });
 
     await streamOpenAIToAnthropic(stream as any, reply, originalModel, provider);
     log.debug('Streaming completed');
@@ -155,7 +159,7 @@ async function handleStreamingRequest(
  * Handle XML streaming API request (for models without native tool calling)
  */
 async function handleXmlStreamingRequest(
-    openai: OpenAI,
+    client: any,
     openaiRequest: any,
     reply: FastifyReply,
     originalModel: string,
@@ -164,10 +168,10 @@ async function handleXmlStreamingRequest(
 ): Promise<void> {
     log.debug('Making XML streaming request (experimental)');
 
-    const stream = await openai.chat.completions.create({
+    const stream = await client.chatCompletionsCreate({
         ...openaiRequest,
         stream: true,
-    } as OpenAI.ChatCompletionCreateParamsStreaming);
+    });
 
     await streamXmlOpenAIToAnthropic(stream as any, reply, originalModel, provider);
     log.debug('XML streaming completed');
