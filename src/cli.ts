@@ -125,95 +125,14 @@ program
 async function promptForConfiguration(): Promise<AdapterConfig> {
     const prefix = UI.dim('?');
 
-    // Required configuration prompts
-    const requiredAnswers = await inquirer.prompt([
-        {
-            type: 'input',
-            name: 'baseUrl',
-            prefix,
-            message: 'OpenAI-compatible base URL:',
-            default: 'https://api.openai.com/v1',
-            transformer: (input: string) => UI.highlight(input),
-            validate: (input: string) => {
-                try {
-                    new URL(input);
-                    return true;
-                } catch {
-                    return 'Please enter a valid URL';
-                }
-            },
-        },
-        {
-            type: 'password',
-            name: 'apiKey',
-            prefix,
-            message: 'API Key:',
-            mask: '*',
-            transformer: (input: string) => UI.highlight('*'.repeat(input.length)),
-            validate: (input: string) => {
-                if (!input || input.trim() === '') {
-                    return 'API key is required';
-                }
-                return true;
-            },
-        },
-        {
-            type: 'input',
-            name: 'opusModel',
-            prefix,
-            message: 'Alternative model for Opus:',
-            transformer: (input: string) => UI.highlight(input),
-            validate: (input: string) => {
-                if (!input || input.trim() === '') {
-                    return 'Model name is required for Opus';
-                }
-                return true;
-            },
-        },
-    ]);
-
-    const opusModel = requiredAnswers.opusModel.trim();
-
-    // Sonnet prompt
-    const sonnetAnswer = await inquirer.prompt([{
-        type: 'input',
-        name: 'sonnetModel',
-        prefix,
-        message: 'Alternative model for Sonnet:',
-        transformer: (input: string) => input ? UI.highlight(input) : '',
-    }]);
-
-    const sonnetModel = sonnetAnswer.sonnetModel.trim() || opusModel;
-
-    // If skipped, replace blank line with fallback display
-    if (!sonnetAnswer.sonnetModel.trim()) {
-        process.stdout.write('\x1b[1A\x1b[2K');
-        console.log(`${prefix} Alternative model for Sonnet: ${UI.dim(`[${opusModel}]`)}`);
-    }
-
-    // Haiku prompt
-    const haikuAnswer = await inquirer.prompt([{
-        type: 'input',
-        name: 'haikuModel',
-        prefix,
-        message: 'Alternative model for Haiku:',
-        transformer: (input: string) => input ? UI.highlight(input) : '',
-    }]);
-
-    const haikuModel = haikuAnswer.haikuModel.trim() || sonnetModel;
-
-    // If skipped, replace blank line with fallback display
-    if (!haikuAnswer.haikuModel.trim()) {
-        process.stdout.write('\x1b[1A\x1b[2K');
-        console.log(`${prefix} Alternative model for Haiku: ${UI.dim(`[${sonnetModel}]`)}`);
-    }
-
-    // Tool calling support prompt (after all models are entered)
+    UI.info('Using StackSpot connection configured via .env file');
+    
+    // Tool calling support prompt 
     const toolSupportAnswer = await inquirer.prompt([{
         type: 'list',
         name: 'supportsTools',
         prefix,
-        message: 'Do your models support tool/function calling?',
+        message: 'Do your StackSpot agents support tool/function calling?',
         choices: [
             { name: 'Yes', value: true },
             { name: 'No', value: false }
@@ -229,27 +148,27 @@ async function promptForConfiguration(): Promise<AdapterConfig> {
             type: 'list',
             name: 'toolType',
             prefix,
-            message: 'Select tool/function type:',
+            message: 'Select tool/function format for the StackSpot Agent:',
             choices: [
-                { name: 'XML (Recommended)', value: 'xml' },
-                { name: 'Native (Openai Format)', value: 'native' }
+                { name: 'Native (StackSpot Actions Format)', value: 'native' },
+                { name: 'XML (Recommended if native fails)', value: 'xml' }
             ],
-            default: 'xml'
+            default: 'native'
         }]);
         toolFormat = toolTypeAnswer.toolType as 'native' | 'xml';
     } else {
-        // User selected "No" - auto-select xml
+        // User selected "No" - auto-select xml as fallback
         console.log(`\x1b[32m✔\x1b[0m Tool Format: ${UI.dim('[XML]')}`);
         toolFormat = 'xml';
     }
 
     return {
-        baseUrl: requiredAnswers.baseUrl.trim(),
-        apiKey: requiredAnswers.apiKey.trim(),
+        baseUrl: 'http://localhost:3080', // the proxy server itself
+        apiKey: 'stackspot-dummy-key',    // ignored by stackspot client
         models: {
-            opus: opusModel,
-            sonnet: sonnetModel,
-            haiku: haikuModel,
+            opus: 'stackspot-agent',
+            sonnet: 'stackspot-agent',
+            haiku: 'stackspot-agent',
         },
         toolFormat,
     };

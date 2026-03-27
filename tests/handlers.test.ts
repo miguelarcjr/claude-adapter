@@ -10,22 +10,13 @@ jest.mock('../src/utils/errorLog', () => ({
     recordError: jest.fn()
 }));
 
-// Mock OpenAI
-const mockCreateChatCompletion = jest.fn();
-const mockOpenAI = jest.fn().mockImplementation(() => ({
-    chat: {
-        completions: {
-            create: mockCreateChatCompletion
-        }
-    }
+// Mock StackSpotClient
+const mockChatCompletionsCreate = jest.fn();
+jest.mock('../src/stackspot/client', () => ({
+    StackSpotClient: jest.fn().mockImplementation(() => ({
+        chatCompletionsCreate: mockChatCompletionsCreate
+    }))
 }));
-
-jest.mock('openai', () => {
-    return {
-        __esModule: true,
-        default: mockOpenAI
-    };
-});
 
 // Mock converters to isolate handler logic
 jest.mock('../src/converters/request', () => ({
@@ -53,6 +44,12 @@ jest.mock('../src/converters/streaming', () => ({
 jest.mock('../src/converters/xmlStreaming', () => ({
     streamXmlOpenAIToAnthropic: jest.fn().mockResolvedValue(undefined)
 }));
+
+// Set required StackSpot environment variables for validation
+process.env.STACKSPOT_CLIENT_ID = 'test-client-id';
+process.env.STACKSPOT_CLIENT_SECRET = 'test-client-secret';
+process.env.STACKSPOT_REALM = 'test-realm';
+process.env.STACKSPOT_AGENT_ID = 'test-agent-id';
 
 // Import the handlers module to test generateRequestId
 // We need to access internal functions, so we'll test through the exported module
@@ -199,16 +196,16 @@ describe('Error Response Handling', () => {
         it('should handle non-streaming request', async () => {
             const handler = handlersModule.createMessagesHandler(config);
 
-            mockCreateChatCompletion.mockResolvedValue({
-                id: 'chatcmpl-123',
-                choices: [{ finish_reason: 'stop', message: { content: 'Hello' } }],
+            mockChatCompletionsCreate.mockResolvedValue({
+                id: 'ss_123',
+                choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'Hello' } }],
                 usage: { prompt_tokens: 10, completion_tokens: 5 },
-                model: 'gpt-4'
+                model: 'stackspot-agent'
             });
 
             await handler({ body: { ...mockRequestBase, stream: false } }, mockReply);
 
-            expect(mockCreateChatCompletion).toHaveBeenCalledWith(expect.objectContaining({
+            expect(mockChatCompletionsCreate).toHaveBeenCalledWith(expect.objectContaining({
                 stream: false
             }));
             expect(mockReply.send).toHaveBeenCalled();
@@ -220,17 +217,17 @@ describe('Error Response Handling', () => {
             // Mock streaming response (async iterator)
             const mockStream = {
                 [Symbol.asyncIterator]: async function* () {
-                    yield { choices: [{ delta: { content: 'He' } }] };
-                    yield { choices: [{ delta: { content: 'llo' } }] };
+                    yield { choices: [{ delta: { content: 'He' }, finish_reason: null }] };
+                    yield { choices: [{ delta: { content: 'llo' }, finish_reason: null }] };
                 }
             };
-            mockCreateChatCompletion.mockResolvedValue(mockStream);
+            mockChatCompletionsCreate.mockResolvedValue(mockStream);
 
             const streamOpenAIToAnthropic = require('../src/converters/streaming').streamOpenAIToAnthropic;
 
             await handler({ body: { ...mockRequestBase, stream: true } }, mockReply);
 
-            expect(mockCreateChatCompletion).toHaveBeenCalledWith(expect.objectContaining({
+            expect(mockChatCompletionsCreate).toHaveBeenCalledWith(expect.objectContaining({
                 stream: true
             }));
             expect(streamOpenAIToAnthropic).toHaveBeenCalled();
@@ -247,9 +244,9 @@ describe('Error Response Handling', () => {
             };
 
             const mockStream = {
-                [Symbol.asyncIterator]: async function* () { yield {}; }
+                [Symbol.asyncIterator]: async function* () { yield { choices: [{ delta: {}, finish_reason: 'stop' }] }; }
             };
-            mockCreateChatCompletion.mockResolvedValue(mockStream);
+            mockChatCompletionsCreate.mockResolvedValue(mockStream);
             const streamXmlOpenAIToAnthropic = require('../src/converters/xmlStreaming').streamXmlOpenAIToAnthropic;
 
             await handler({ body: req }, mockReply);
@@ -259,11 +256,11 @@ describe('Error Response Handling', () => {
 
         it('should log info when non-streaming request completes', async () => {
             const handler = handlersModule.createMessagesHandler(config);
-            mockCreateChatCompletion.mockResolvedValue({
-                id: 'chatcmpl-123',
-                choices: [{ finish_reason: 'stop', message: { content: 'Hello' } }],
+            mockChatCompletionsCreate.mockResolvedValue({
+                id: 'ss_123',
+                choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'Hello' } }],
                 usage: { prompt_tokens: 10, completion_tokens: 5 },
-                model: 'gpt-4'
+                model: 'stackspot-agent'
             });
 
             await handler({ body: { ...mockRequestBase, stream: false } }, mockReply);

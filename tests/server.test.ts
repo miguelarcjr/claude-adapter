@@ -29,6 +29,13 @@ const testConfig: AdapterConfig = {
     },
 };
 
+// Set required StackSpot environment variables for validation
+process.env.STACKSPOT_CLIENT_ID = 'test-client-id';
+process.env.STACKSPOT_CLIENT_SECRET = 'test-client-secret';
+process.env.STACKSPOT_REALM = 'test-realm';
+process.env.STACKSPOT_AGENT_ID = 'test-agent-id';
+
+
 describe('Server', () => {
     describe('createServer', () => {
         it('should create a server with app instance', () => {
