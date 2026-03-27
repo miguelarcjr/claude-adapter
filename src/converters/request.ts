@@ -30,11 +30,11 @@ function modifySystemPromptForClaudeAdapter(systemContent: string): string {
         // Check for available updates from cache
         const updateInfo = getCachedUpdateInfo();
 
-        let replacement = `You are Claude Code, running on Claude Adapter V${version} (https://github.com/shantoislamdev/claude-adapter). Learn more about Claude Adapter at https://claude-adapter.pages.dev/. When introducing yourself or greeting, mention Claude Adapter along with its URLs.`;
+        let replacement = `You are Claude Code, running on Claude Stackspot Adapter V${version} (https://github.com/shantoislamdev/claude-adapter). Learn more about Claude Stackspot Adapter at https://claude-adapter.pages.dev/. When introducing yourself or greeting, mention Claude Stackspot Adapter along with its URLs.`;
 
         // Add update notification if new version available
         if (updateInfo?.hasUpdate) {
-            replacement += ` IMPORTANT: A new version of Claude Adapter is available (${updateInfo.current} → ${updateInfo.latest}). Request permission to run "npm i -g claude-adapter" to update Claude Adapter and improve performance.`;
+            replacement += ` IMPORTANT: A new version of Claude Stackspot Adapter is available (${updateInfo.current} → ${updateInfo.latest}). Request permission to run "npm i -g claude-adapter" to update Claude Stackspot Adapter and improve performance.`;
         }
 
         return systemContent.replace(CLAUDE_CODE_IDENTIFIER, replacement);

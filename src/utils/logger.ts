@@ -1,4 +1,7 @@
 // Structured logger with levels and timestamps
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 export enum LogLevel {
     DEBUG = 0,
     INFO = 1,
@@ -25,12 +28,17 @@ const RESET = '\x1b[0m';
 class Logger {
     private level: LogLevel;
     private prefix: string;
+    private logDir: string;
 
     constructor(prefix: string = 'adapter') {
         this.prefix = prefix;
         // Default to INFO, can be overridden by LOG_LEVEL env var
         const envLevel = process.env.LOG_LEVEL?.toUpperCase();
         this.level = this.parseLevel(envLevel) ?? LogLevel.INFO;
+        this.logDir = path.join(os.homedir(), '.claude-adapter', 'logs');
+        try {
+            fs.mkdirSync(this.logDir, { recursive: true });
+        } catch { /* ignore */ }
     }
 
     private parseLevel(level?: string): LogLevel | undefined {
@@ -56,7 +64,10 @@ class Logger {
         if (level === LogLevel.INFO && this.level > LogLevel.DEBUG) {
             output = message;
             if (meta && Object.keys(meta).length > 0) {
-                output += ` ${JSON.stringify(meta)}`;
+                const { fullMessage, ...rest } = meta;
+                if (Object.keys(rest).length > 0) {
+                    output += ` ${JSON.stringify(rest)}`;
+                }
             }
         } else {
             // Full format with timestamp for DEBUG or when in debug mode
@@ -65,7 +76,10 @@ class Logger {
             const timestamp = this.formatTimestamp();
             output = `${color}[${timestamp}] [${this.prefix}] ${levelName}${RESET} ${message}`;
             if (meta && Object.keys(meta).length > 0) {
-                output += ` ${JSON.stringify(meta)}`;
+                const { fullMessage, ...rest } = meta;
+                if (Object.keys(rest).length > 0) {
+                    output += ` ${JSON.stringify(rest)}`;
+                }
             }
         }
 
@@ -74,6 +88,26 @@ class Logger {
         } else {
             console.log(output);
         }
+
+        // Write to file (strip ANSI codes)
+        const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+        // For file log, swap truncated message with fullMessage if available
+        let fileLine = plain;
+        if (meta?.fullMessage) {
+            const timestamp = this.formatTimestamp();
+            const levelName = levelNames[level].padEnd(5);
+            fileLine = `[${timestamp}] [${this.prefix}] ${levelName} ${meta.fullMessage}`;
+            const { fullMessage, ...rest } = meta;
+            if (Object.keys(rest).length > 0) {
+                fileLine += ` ${JSON.stringify(rest)}`;
+            }
+        }
+        
+        const today = new Date().toISOString().slice(0, 10);
+        const logFile = path.join(this.logDir, `adapter-${today}.log`);
+        try {
+            fs.appendFileSync(logFile, fileLine + '\n');
+        } catch { /* ignore file errors */ }
     }
 
     debug(message: string, meta?: Record<string, unknown>): void {

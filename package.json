@@ -52,6 +52,7 @@
     "@anthropic-ai/sdk": "0.71.2",
     "chalk": "^4.1.2",
     "commander": "^12.1.0",
+    "dotenv": "^17.3.1",
     "fastify": "^5.1.0",
     "inquirer": "^8.2.6",
     "openai": "4.76.0"

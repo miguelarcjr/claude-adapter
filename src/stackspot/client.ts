@@ -17,6 +17,29 @@ class ApiError extends Error {
     }
 }
 
+/**
+ * StackSpot wraps agent responses inside `data.message` as an escaped JSON string.
+ * e.g. data: {"message": "{\"summary\":\"...\",\"actions\":[]}", ...}
+ * This helper parses it into a flat object with `summary` and `actions`.
+ */
+function unwrapStackSpotPayload(parsed: any): { text: string; actions: any[] } {
+    let inner: any = parsed;
+
+    // If there is a `message` field that is a JSON string, parse it
+    if (typeof parsed.message === 'string') {
+        try {
+            inner = JSON.parse(parsed.message);
+        } catch {
+            // If it cannot be parsed, treat the raw message string as plain text
+            return { text: parsed.message, actions: [] };
+        }
+    }
+
+    const text = inner.summary || inner.text || '';
+    const actions = Array.isArray(inner.actions) ? inner.actions : [];
+    return { text, actions };
+}
+
 export class StackSpotClient {
     private config: StackSpotConfig;
     private accessToken: string | null = null;
@@ -76,17 +99,44 @@ export class StackSpotClient {
 
     public async chatCompletionsCreate(request: any): Promise<any> {
         const token = await this.getToken();
+
+        /**
+         * Extracts a plain text string from an Anthropic content value.
+         * Content can be: a plain string, or an array of content blocks like
+         * [{type:'text', text:'...'}, {type:'tool_result', content:'...'}, ...]
+         */
+        function extractText(content: any): string {
+            if (!content) return '';
+            if (typeof content === 'string') return content;
+            if (Array.isArray(content)) {
+                return content.map((block: any) => {
+                    if (typeof block === 'string') return block;
+                    if (block.type === 'text') return block.text || '';
+                    if (block.type === 'tool_result') {
+                        const inner = block.content;
+                        if (typeof inner === 'string') return `[Tool Result]: ${inner}`;
+                        if (Array.isArray(inner)) return `[Tool Result]: ${inner.map((b: any) => b.text || '').join(' ')}`;
+                        return '';
+                    }
+                    if (block.type === 'tool_use') {
+                        return `[Tool Call: ${block.name}(${JSON.stringify(block.input || {})})]`;
+                    }
+                    return '';
+                }).filter(Boolean).join('\n');
+            }
+            return String(content);
+        }
         
         // Convert array of messages into a single prompt for StackSpot
         let userPrompt = '';
         if (request.messages) {
             userPrompt = request.messages.map((m: any) => {
-                if (m.role === 'system') return `<system>\n${m.content}\n</system>`;
+                if (m.role === 'system') return `<system>\n${extractText(m.content)}\n</system>`;
                 if (m.role === 'tool') {
-                    return `TOOL RESULT (ID: ${m.tool_call_id || 'unknown'}):\n${m.content}`;
+                    return `TOOL RESULT (ID: ${m.tool_call_id || 'unknown'}):\n${extractText(m.content)}`;
                 }
                 
-                let text = `${m.role.toUpperCase()}: ${m.content || ''}`;
+                let text = `${m.role.toUpperCase()}: ${extractText(m.content)}`;
                 if (m.tool_calls && Array.isArray(m.tool_calls)) {
                     const toolActions = m.tool_calls.map((tc: any) => `[Action: ${tc.function?.name} with arguments ${tc.function?.arguments} (ID: ${tc.id})]`).join('\n');
                     text += '\n' + toolActions;
@@ -95,12 +145,20 @@ export class StackSpotClient {
             }).join('\n\n');
         }
 
+
         const stackSpotBody = {
             user_prompt: userPrompt,
-            stream: request.stream || false
+            streaming: request.stream || false,
+            stackspot_knowledge: false,
+            return_ks_in_response: true
         };
         
-        logger.debug('Sending payload to StackSpot API', { agentId: this.config.agentId, promptPreview: userPrompt.substring(0, 150) + '...' });
+        const promptPreview = userPrompt.length > 200 ? userPrompt.substring(0, 200) + '...' : userPrompt;
+        logger.debug('Sending payload to StackSpot API', { 
+            agentId: this.config.agentId, 
+            message: `Sending payload: ${promptPreview}`,
+            fullMessage: `Sending full payload: ${userPrompt}`
+        });
 
         const fetchOptions: RequestInit = {
             method: 'POST',
@@ -111,7 +169,7 @@ export class StackSpotClient {
             body: JSON.stringify(stackSpotBody)
         };
 
-        const baseUrl = this.config.apiUrl || 'https://genai-code-buddy-api.stackspot.com';
+        const baseUrl = this.config.apiUrl || 'https://genai-inference-app.stackspot.com';
         const url = `${baseUrl}/v1/agent/${this.config.agentId}/chat`;
 
         if (!request.stream) {
@@ -127,23 +185,32 @@ export class StackSpotClient {
             const data = (await response.json()) as any;
             
             logger.debug('StackSpot raw response received', { response: data });
+
+            const { text: unwrappedText, actions: unwrappedActions } = unwrapStackSpotPayload(data);
             
             // Map tool calls if any
-            let content = data.text || data.summary || '';
+            let content = unwrappedText;
             let tool_calls = undefined;
 
             if (data.tool_calls && Array.isArray(data.tool_calls) && data.tool_calls.length > 0) {
                 tool_calls = data.tool_calls;
-            } else if (data.actions && Array.isArray(data.actions) && data.actions.length > 0) {
+            } else if (unwrappedActions.length > 0) {
                 // Translator for flat "actions" strict schema from StackSpot to OpenAI format
-                tool_calls = data.actions.map((action: any, idx: number) => {
+                tool_calls = unwrappedActions.map((action: any, idx: number) => {
                     const { type, ...args } = action;
+                    // Filter out null/undefined arguments to avoid validation errors in Claude
+                    const filteredArgs: any = {};
+                    for (const key in args) {
+                        if (args[key] !== null && args[key] !== undefined) {
+                            filteredArgs[key] = args[key];
+                        }
+                    }
                     return {
                         id: `call_${Date.now()}_${idx}`,
                         type: 'function',
                         function: {
                             name: type,
-                            arguments: JSON.stringify(args)
+                            arguments: JSON.stringify(filteredArgs)
                         }
                     };
                 });
@@ -203,18 +270,28 @@ export class StackSpotClient {
                                 continue;
                             }
 
-                            const textChunk = parsed.text || parsed.summary || '';
+                            // stop_reason chunk has no message, skip it
+                            if (parsed.stop_reason) continue;
+
+                            const { text: textChunk, actions: chunkActions } = unwrapStackSpotPayload(parsed);
                             let toolCalls = parsed.tool_calls;
 
-                            if (!toolCalls && parsed.actions && Array.isArray(parsed.actions)) {
-                                toolCalls = parsed.actions.map((action: any, idx: number) => {
+                            if (!toolCalls && chunkActions.length > 0) {
+                                toolCalls = chunkActions.map((action: any, idx: number) => {
                                     const { type, ...args } = action;
+                                    // Filter out null/undefined arguments
+                                    const filteredArgs: any = {};
+                                    for (const key in args) {
+                                        if (args[key] !== null && args[key] !== undefined) {
+                                            filteredArgs[key] = args[key];
+                                        }
+                                    }
                                     return {
                                         id: `call_${Date.now()}_${idx}`,
                                         type: 'function',
                                         function: {
                                             name: type,
-                                            arguments: JSON.stringify(args)
+                                            arguments: JSON.stringify(filteredArgs)
                                         }
                                     };
                                 });

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // CLI entry point for claude-adapter
+import 'dotenv/config';
 import { Command } from 'commander';
 import inquirer from 'inquirer';
 import { AdapterConfig } from './types/config';
