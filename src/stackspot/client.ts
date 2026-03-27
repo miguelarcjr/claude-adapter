@@ -1,4 +1,5 @@
 import https from 'https';
+import { logger } from '../utils/logger';
 
 export interface StackSpotConfig {
     clientId: string;
@@ -98,6 +99,8 @@ export class StackSpotClient {
             user_prompt: userPrompt,
             stream: request.stream || false
         };
+        
+        logger.debug('Sending payload to StackSpot API', { agentId: this.config.agentId, promptPreview: userPrompt.substring(0, 150) + '...' });
 
         const fetchOptions: RequestInit = {
             method: 'POST',
@@ -123,12 +126,27 @@ export class StackSpotClient {
             }
             const data = (await response.json()) as any;
             
+            logger.debug('StackSpot raw response received', { response: data });
+            
             // Map tool calls if any
-            let content = data.text || '';
+            let content = data.text || data.summary || '';
             let tool_calls = undefined;
 
             if (data.tool_calls && Array.isArray(data.tool_calls) && data.tool_calls.length > 0) {
                 tool_calls = data.tool_calls;
+            } else if (data.actions && Array.isArray(data.actions) && data.actions.length > 0) {
+                // Translator for flat "actions" strict schema from StackSpot to OpenAI format
+                tool_calls = data.actions.map((action: any, idx: number) => {
+                    const { type, ...args } = action;
+                    return {
+                        id: `call_${Date.now()}_${idx}`,
+                        type: 'function',
+                        function: {
+                            name: type,
+                            arguments: JSON.stringify(args)
+                        }
+                    };
+                });
             }
 
             return {
@@ -185,8 +203,26 @@ export class StackSpotClient {
                                 continue;
                             }
 
-                            const textChunk = parsed.text || parsed.content || '';
-                            const toolCalls = parsed.tool_calls;
+                            const textChunk = parsed.text || parsed.summary || '';
+                            let toolCalls = parsed.tool_calls;
+
+                            if (!toolCalls && parsed.actions && Array.isArray(parsed.actions)) {
+                                toolCalls = parsed.actions.map((action: any, idx: number) => {
+                                    const { type, ...args } = action;
+                                    return {
+                                        id: `call_${Date.now()}_${idx}`,
+                                        type: 'function',
+                                        function: {
+                                            name: type,
+                                            arguments: JSON.stringify(args)
+                                        }
+                                    };
+                                });
+                            }
+                            
+                            if (toolCalls) {
+                                logger.debug('Intercepted Tool Call from StackSpot stream', { toolCalls });
+                            }
 
                             yield {
                                 id: `ss_${Date.now()}`,
