@@ -75,14 +75,18 @@ program
             // Step 4: Update Claude Code settings (if enabled)
             if (options.claudeSettings) {
                 updateClaudeSettings(proxyUrl, config.models);
-                UI.statusDone(true, 'Models configured:');
-
-                // Display configured models
-                UI.table([
-                    { label: 'Opus', value: config.models.opus },
-                    { label: 'Sonnet', value: config.models.sonnet },
-                    { label: 'Haiku', value: config.models.haiku }
-                ]);
+                
+                if (config.models) {
+                    UI.statusDone(true, 'Models configured:');
+                    // Display configured models
+                    UI.table([
+                        { label: 'Opus', value: config.models.opus },
+                        { label: 'Sonnet', value: config.models.sonnet },
+                        { label: 'Haiku', value: config.models.haiku }
+                    ]);
+                } else {
+                    UI.statusDone(true, 'Claude Code base URL configured (No models overridden)');
+                }
             } else {
                 UI.info('Claude Code settings not updated (use manual configuration)');
                 UI.hint(`Set ANTHROPIC_BASE_URL=${proxyUrl} in your Claude Code settings`);

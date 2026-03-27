@@ -78,7 +78,7 @@ export function updateClaudeJson(): void {
  */
 export function updateClaudeSettings(
     proxyUrl: string,
-    models: { opus: string; sonnet: string; haiku: string }
+    models?: { opus: string; sonnet: string; haiku: string }
 ): void {
     // Ensure directory exists
     if (!fs.existsSync(CLAUDE_SETTINGS_DIR)) {
@@ -101,11 +101,15 @@ export function updateClaudeSettings(
     settings.env = {
         ...(settings.env || {}),
         ANTHROPIC_BASE_URL: proxyUrl,
-        ANTHROPIC_AUTH_TOKEN: 'default',
-        ANTHROPIC_DEFAULT_OPUS_MODEL: models.opus,
-        ANTHROPIC_DEFAULT_SONNET_MODEL: models.sonnet,
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: models.haiku,
+        ANTHROPIC_AUTH_TOKEN: 'default'
     };
+    
+    // Only configure model overrides if models were provided
+    if (models) {
+        settings.env.ANTHROPIC_DEFAULT_OPUS_MODEL = models.opus;
+        settings.env.ANTHROPIC_DEFAULT_SONNET_MODEL = models.sonnet;
+        settings.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = models.haiku;
+    }
 
     fs.writeFileSync(CLAUDE_SETTINGS_PATH, JSON.stringify(settings, null, 2), 'utf-8');
 }
