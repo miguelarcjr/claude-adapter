@@ -5,12 +5,22 @@ export interface StackSpotConfig {
     clientSecret: string;
     realm: string;
     agentId: string;
+    apiUrl?: string;
+}
+
+class ApiError extends Error {
+    public status?: number;
+    constructor(message: string, status?: number) {
+        super(message);
+        this.status = status;
+    }
 }
 
 export class StackSpotClient {
     private config: StackSpotConfig;
     private accessToken: string | null = null;
     private tokenExpiresAt: number = 0;
+    private tokenPromise?: Promise<string>;
 
     constructor(config: StackSpotConfig) {
         this.config = config;
@@ -21,6 +31,18 @@ export class StackSpotClient {
             return this.accessToken;
         }
 
+        if (this.tokenPromise) {
+            return this.tokenPromise;
+        }
+
+        this.tokenPromise = this.fetchToken().finally(() => {
+            this.tokenPromise = undefined;
+        });
+
+        return this.tokenPromise;
+    }
+
+    private async fetchToken(): Promise<string> {
         const url = `https://idm.stackspot.com/${this.config.realm}/oidc/oauth/token`;
         const params = new URLSearchParams();
         params.append('client_id', this.config.clientId);
@@ -35,8 +57,12 @@ export class StackSpotClient {
             body: params.toString()
         });
 
+        if (!response.headers.get('content-type')?.includes('json')) {
+            throw new ApiError('IdP returned non-JSON response', 502);
+        }
+
         if (!response.ok) {
-            throw new Error(`Failed to authenticate with StackSpot: ${response.statusText}`);
+            throw new ApiError(`Failed to authenticate with StackSpot: ${response.statusText}`, response.status);
         }
 
         const data = await response.json() as any;
@@ -55,7 +81,16 @@ export class StackSpotClient {
         if (request.messages) {
             userPrompt = request.messages.map((m: any) => {
                 if (m.role === 'system') return `<system>\n${m.content}\n</system>`;
-                return `${m.role.toUpperCase()}: ${m.content}`;
+                if (m.role === 'tool') {
+                    return `TOOL RESULT (ID: ${m.tool_call_id || 'unknown'}):\n${m.content}`;
+                }
+                
+                let text = `${m.role.toUpperCase()}: ${m.content || ''}`;
+                if (m.tool_calls && Array.isArray(m.tool_calls)) {
+                    const toolActions = m.tool_calls.map((tc: any) => `[Action: ${tc.function?.name} with arguments ${tc.function?.arguments} (ID: ${tc.id})]`).join('\n');
+                    text += '\n' + toolActions;
+                }
+                return text;
             }).join('\n\n');
         }
 
@@ -73,27 +108,39 @@ export class StackSpotClient {
             body: JSON.stringify(stackSpotBody)
         };
 
-        const baseUrl = 'https://genai-code-buddy-api.stackspot.com';
+        const baseUrl = this.config.apiUrl || 'https://genai-code-buddy-api.stackspot.com';
         const url = `${baseUrl}/v1/agent/${this.config.agentId}/chat`;
 
         if (!request.stream) {
             const response = await fetch(url, fetchOptions);
+            const contentType = response.headers.get('content-type');
             if (!response.ok) {
                 const errBody = await response.text();
-                throw new Error(`StackSpot API error ${response.status}: ${errBody}`);
+                throw new ApiError(`StackSpot API error ${response.status}: ${errBody}`, response.status);
             }
-            const data = await response.text();
+            if (!contentType?.includes('json')) {
+                throw new ApiError('StackSpot returned non-JSON response', 502);
+            }
+            const data = (await response.json()) as any;
             
-            // Mock an OpenAI-like response object for compatibility with adapter
+            // Map tool calls if any
+            let content = data.text || '';
+            let tool_calls = undefined;
+
+            if (data.tool_calls && Array.isArray(data.tool_calls) && data.tool_calls.length > 0) {
+                tool_calls = data.tool_calls;
+            }
+
             return {
                 id: `ss_${Date.now()}`,
                 model: this.config.agentId,
                 choices: [{
                     message: {
                         role: 'assistant',
-                        content: data
+                        content,
+                        ...(tool_calls ? { tool_calls } : {})
                     },
-                    finish_reason: 'stop'
+                    finish_reason: tool_calls ? 'tool_calls' : 'stop'
                 }],
                 usage: {
                   prompt_tokens: 0,
@@ -106,11 +153,9 @@ export class StackSpotClient {
             const response = await fetch(url, fetchOptions);
             if (!response.ok) {
                 const errBody = await response.text();
-                throw new Error(`StackSpot API error ${response.status}: ${errBody}`);
+                throw new ApiError(`StackSpot API error ${response.status}: ${errBody}`, response.status);
             }
             
-            // We need to return an AsyncIterable that mimics OpenAI stream chunks
-            // since handlers.ts expects an OpenAI Stream.
             async function* streamGenerator() {
                 if (!response.body) return;
                 
@@ -124,7 +169,7 @@ export class StackSpotClient {
                     
                     buffer += decoder.decode(value, { stream: true });
                     const lines = buffer.split('\n');
-                    buffer = lines.pop() || ''; // keep the incomplete line in buffer
+                    buffer = lines.pop() || '';
 
                     for (const line of lines) {
                         if (line.trim() === '') continue;
@@ -132,23 +177,25 @@ export class StackSpotClient {
                             const dataStr = line.substring(6);
                             if (dataStr === '[DONE]') break;
                             
-                            // StackSpot stream gives parts of text
-                            // In real scenarios you should parse JSON if stackspot sends JSON
-                            // Assuming StackSpot sends raw text chunks in the data (or JSON with text)
-                            let textChunk = '';
+                            let parsed: any;
                             try {
-                                const parsed = JSON.parse(dataStr);
-                                textChunk = parsed.text || parsed.content || '';
-                            } catch {
-                                textChunk = dataStr;
+                                parsed = JSON.parse(dataStr);
+                            } catch (err) {
+                                console.warn('Failed to parse StackSpot stream chunk as JSON:', dataStr);
+                                continue;
                             }
 
-                            // Yield OpenAI compatible chunk
+                            const textChunk = parsed.text || parsed.content || '';
+                            const toolCalls = parsed.tool_calls;
+
                             yield {
                                 id: `ss_${Date.now()}`,
                                 model: 'stackspot-agent',
                                 choices: [{
-                                    delta: { content: textChunk },
+                                    delta: { 
+                                        content: textChunk,
+                                        ...(toolCalls ? { tool_calls: toolCalls } : {})
+                                    },
                                     finish_reason: null
                                 }]
                             };
@@ -156,7 +203,6 @@ export class StackSpotClient {
                     }
                 }
                 
-                // Final chunk with finish_reason
                 yield {
                     id: `ss_${Date.now()}`,
                     model: 'stackspot-agent',

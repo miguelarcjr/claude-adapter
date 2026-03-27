@@ -3,7 +3,7 @@
 export interface AdapterConfig {
     baseUrl: string;
     apiKey: string;
-    models: ModelConfig;
+    models?: ModelConfig;
     toolFormat?: 'native' | 'xml';  // Default: 'native'
     port?: number;
     stackspot?: {
@@ -11,6 +11,7 @@ export interface AdapterConfig {
         clientSecret: string;
         realm: string;
         agentId: string;
+        apiUrl?: string;
     };
 }
 

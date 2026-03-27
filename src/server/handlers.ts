@@ -25,15 +25,29 @@ function generateRequestId(): string {
 /**
  * Handle POST /v1/messages requests
  */
+function validateBootConfig(config: AdapterConfig) {
+    const stackspotConfig = config.stackspot || {
+        clientId: process.env.STACKSPOT_CLIENT_ID || '',
+        clientSecret: process.env.STACKSPOT_CLIENT_SECRET || '',
+        realm: process.env.STACKSPOT_REALM || '',
+        agentId: process.env.STACKSPOT_AGENT_ID || '',
+        apiUrl: process.env.STACKSPOT_API_URL
+    };
+    const missing = [];
+    if (!stackspotConfig.clientId) missing.push('STACKSPOT_CLIENT_ID');
+    if (!stackspotConfig.clientSecret) missing.push('STACKSPOT_CLIENT_SECRET');
+    if (!stackspotConfig.realm) missing.push('STACKSPOT_REALM');
+    if (!stackspotConfig.agentId) missing.push('STACKSPOT_AGENT_ID');
+    
+    if (missing.length > 0) {
+        throw new Error(`Missing required StackSpot configuration: ${missing.join(', ')}`);
+    }
+    return stackspotConfig;
+}
+
 export function createMessagesHandler(config: AdapterConfig) {
-    const stackspot = new StackSpotClient(
-        config.stackspot || { 
-            clientId: process.env.STACKSPOT_CLIENT_ID || '', 
-            clientSecret: process.env.STACKSPOT_CLIENT_SECRET || '',
-            realm: process.env.STACKSPOT_REALM || '',
-            agentId: process.env.STACKSPOT_AGENT_ID || ''
-        }
-    );
+    const stackspotConfig = validateBootConfig(config);
+    const stackspot = new StackSpotClient(stackspotConfig);
 
     return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
         const requestId = generateRequestId();
